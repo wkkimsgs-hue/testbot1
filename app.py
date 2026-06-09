@@ -1,14 +1,16 @@
+import os
 import subprocess
 from flask import Flask, render_template, request, jsonify
 
 app = Flask(__name__)
 
 MUSL_BIN = "/data/data/com.termux/files/usr/lib/node_modules/@anthropic-ai/claude-code-linux-arm64-musl/claude"
+HOME = os.path.expanduser("~")
 
 
 def ask_claude(message):
     result = subprocess.run(
-        [MUSL_BIN, "-p", message],
+        ["proot-distro", "login", "alpine", "--bind", f"{HOME}:/root", "--", MUSL_BIN, "-p", message],
         capture_output=True,
         text=True,
         timeout=120,
