@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>S10e Media Node</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
+<style>
+  .progress { height: 6px; background: #2c2c2c; }
+  .progress-bar { transition: width 0.4s ease; }
+  #progressWrap { display: none; }
+  .btn-del {
+    color: #dc3545;
+    border-color: #dc3545;
+    padding: 1px 7px;
+    font-size: .75rem;
+    line-height: 1.4;
+    opacity: 0.55;
+    transition: opacity 0.15s;
+  }
+  .btn-del:hover { opacity: 1; color: #dc3545; border-color: #dc3545; }
+  .file-row { transition: opacity 0.25s ease; }
+  .file-row.removing { opacity: 0; }
+</style>
+</head>
+<body class="bg-dark text-light">
+<div class="container py-4" style="max-width:680px">
+  <h4 class="mb-4">🎵 S10e Media Node <a href="/claude" class="btn btn-sm btn-outline-light float-end" style="font-size:.75rem">🤖 Claude</a></h4>
+
+  <div class="input-group mb-2">
+    <input id="urlInput" type="text" class="form-control bg-secondary text-light border-0"
+           placeholder="YouTube URL을 입력하세요">
+    <button id="dlBtn" class="btn btn-success" onclick="startDownload()">다운로드</button>
+  </div>
+
+  <div id="statusBox" class="small text-warning mb-1" style="min-height:1.2rem"></div>
+
+  <div id="progressWrap" class="mb-3">
+    <div class="progress">
+      <div id="progressBar" class="progress-bar bg-success" role="progressbar"
+           style="width:0%" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>
+    </div>
+  </div>
+
+  <hr class="border-secondary">
+  <h6 class="mb-3 text-secondary">다운로드 목록</h6>
+  <ul id="fileList" class="list-group list-group-flush">
+    {% for f in files %}
+    <li class="list-group-item bg-dark text-light d-flex justify-content-between align-items-center border-secondary file-row"
+        data-filename="{{ f }}">
+      <span class="text-truncate me-2" style="max-width:75%">{{ f }}</span>
+      <div class="d-flex gap-1 flex-shrink-0">
+        <button class="btn btn-sm btn-del border" onclick="deleteFile(this)">✕</button>
+        <a href="/files/{{ f }}" class="btn btn-sm btn-outline-light">⬇</a>
+      </div>
+    </li>
+    {% endfor %}
+    {% if not files %}
+    <li id="emptyMsg" class="list-group-item bg-dark text-secondary border-secondary">아직 없습니다.</li>
+    {% endif %}
+  </ul>
+</div>
+
+<script>
+let pollTimer = null;
+
+const STAGE_LABELS = {
+  queued:      { text: '대기 중…',       cls: 'warning', pct: 0   },
+  analyzing:   { text: '분석 중…',       cls: 'warning', pct: 10  },
+  downloading: { text: '다운로드 중…',   cls: 'info',    pct: null },
+  converting:  { text: 'MP3 변환 중…',   cls: 'warning', pct: 99  },
+  duplicate:   { text: '이미 있는 파일', cls: 'info',    pct: 100 },
+  done:        { text: '✅ 완료',         cls: 'success', pct: 100 },
+  error:       { text: '❌ 실패',         cls: 'danger',  pct: 0   },
+};
+
+async function startDownload() {
+  const url = document.getElementById('urlInput').value.trim();
+  if (!url) return;
+  document.getElementById('dlBtn').disabled = true;
+  setStatus('요청 중…', 'warning', 5);
+  try {
+    const res = await fetch('/download', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({url})
+    });
+    const data = await res.json();
+    if (data.error) { setStatus('오류: ' + data.error, 'danger', 0); done(); return; }
+    poll(data.job_id);
+  } catch(e) { setStatus('연결 실패: ' + e, 'danger', 0); done(); }
+}
+
+function poll(jobId) {
+  showProgress(true);
+  pollTimer = setInterval(async () => {
+    try {
+      const res = await fetch('/status/' + jobId);
+      const d = await res.json();
+      const stage = d.stage || d.status;
+      const info  = STAGE_LABELS[stage] || { text: stage, cls: 'warning', pct: null };
+      const pct   = info.pct !== null ? info.pct : (d.progress || 0);
+      let label   = info.text;
+      if (stage === 'downloading') label = `다운로드 중… ${d.progress || 0}%`;
+      setStatus(label, info.cls, pct);
+      if (d.status === 'done') {
+        clearInterval(pollTimer);
+        showProgress(false);
+        addFileRow(d.filename);
+        setStatus(`✅ 완료: ${d.title}`, 'success', 100);
+        done();
+      } else if (d.status === 'error') {
+        clearInterval(pollTimer);
+        showProgress(false);
+        setStatus(`❌ 실패: ${d.error}`, 'danger', 0);
+        done();
+      }
+    } catch(e) {
+      clearInterval(pollTimer);
+      showProgress(false);
+      setStatus('폴링 오류', 'danger', 0);
+      done();
+    }
+  }, 1500);
+}
+
+function setStatus(msg, cls, pct) {
+  const el = document.getElementById('statusBox');
+  el.textContent = msg;
+  el.className = `small text-${cls} mb-1`;
+  if (pct !== undefined) {
+    const bar = document.getElementById('progressBar');
+    bar.style.width = pct + '%';
+    bar.setAttribute('aria-valuenow', pct);
+    bar.className = `progress-bar bg-${cls === 'danger' ? 'danger' : cls === 'success' ? 'success' : 'info'}`;
+  }
+}
+
+function showProgress(visible) {
+  document.getElementById('progressWrap').style.display = visible ? 'block' : 'none';
+  if (!visible) document.getElementById('progressBar').style.width = '0%';
+}
+
+function addFileRow(filename) {
+  if (!filename) return;
+  const ul = document.getElementById('fileList');
+  if (ul.querySelector(`[data-filename="${filename}"]`)) return;
+  const empty = document.getElementById('emptyMsg');
+  if (empty) empty.remove();
+  const li = document.createElement('li');
+  li.className = 'list-group-item bg-dark text-light d-flex justify-content-between align-items-center border-secondary file-row';
+  li.dataset.filename = filename;
+  li.innerHTML = `
+    <span class="text-truncate me-2" style="max-width:75%">${filename}</span>
+    <div class="d-flex gap-1 flex-shrink-0">
+      <button class="btn btn-sm btn-del border" onclick="deleteFile(this)">✕</button>
+      <a href="/files/${encodeURIComponent(filename)}" class="btn btn-sm btn-outline-light">⬇</a>
+    </div>`;
+  ul.prepend(li);
+}
+
+async function deleteFile(btn) {
+  const li = btn.closest('li');
+  const filename = li.dataset.filename;
+  btn.disabled = true;
+  try {
+    const res = await fetch('/files/' + encodeURIComponent(filename), { method: 'DELETE' });
+    if (res.ok) {
+      li.classList.add('removing');
+      setTimeout(() => {
+        li.remove();
+        if (!document.querySelector('#fileList .file-row')) {
+          const ul = document.getElementById('fileList');
+          ul.innerHTML = '<li id="emptyMsg" class="list-group-item bg-dark text-secondary border-secondary">아직 없습니다.</li>';
+        }
+      }, 250);
+    } else {
+      btn.disabled = false;
+    }
+  } catch(e) { btn.disabled = false; }
+}
+
+function done() { document.getElementById('dlBtn').disabled = false; }
+
+document.getElementById('urlInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter') startDownload();
+});
+</script>
+</body>
+</html>
