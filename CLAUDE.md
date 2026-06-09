@@ -1,104 +1,136 @@
-# test1 — Flask + Claude Chat 앱
+# s10e_media_node — 통합 Flask 서버
 
-## 응답 규칙
-매 응답 마지막에 아래 형식으로 토큰 추정치를 출력할 것:
-```
-📊 추정 컨텍스트: ~XX,XXX 토큰 / 200K (약 X%)
-```
+## 응답 규칙 (Claude에게)
+- 매 응답 마지막에 아래 형식으로 표기할 것:
+  `📊 ~XX,XXX/200K/X%  |  chat.md: X,XXX bytes`
+- 작업 중 확인 질문 금지 — 판단이 필요하면 스스로 결정하고 실행. 막히면 결과 보고 후 대안 제시.
+- 장기메모리 저장은 사용자가 기억해라고 명시할 때만.
 
-## 개요
-사용자가 입력한 메시지를 Claude API로 전달하고 응답을 화면에 출력하는 단순 웹 채팅 앱.
+---
+
+## 프로젝트 개요
+YouTube MP3 다운로더 + Claude 채팅을 하나의 Flask 앱으로 통합한 서버.
+원격 기기(Android Termux)에서 runit 서비스로 상시 실행.
+
+---
+
+## 환경 정보
+
+| 항목 | 값 |
+|------|----|
+| 기기 (로컬) | 192.168.0.11 — Flask + Claude (port 5000) |
+| 기기 (원격) | 192.168.0.10 / 공인 118.32.140.85 |
+| SSH 접속 | `sshpass -p rladhksrb1 ssh -o StrictHostKeyChecking=no -p 8022 u0_a216@118.32.140.85` |
+| GitHub 레포 | https://github.com/wkkimsgs-hue/testbot1 |
+| Flask 포트 | 8080 |
+| 서비스 이름 | testbot1-flask (runit) |
+
+---
 
 ## 디렉토리 구조
 ```
-test1/
-├── app.py                  # Flask 서버 + Claude API 호출
-├── CLAUDE.md               # 이 문서
-└── templates/
-    └── index.html          # 프론트엔드 UI
+s10e_media_node/
+├── run.py                        # 진입점
+├── requirements.txt
+├── CLAUDE.md                     # 이 파일
+├── chat.md                       # /chat, /api 엔드포인트 사용법
+├── config/
+│   └── settings.env              # 환경변수 (DISCORD_TOKEN, FLASK_PORT 등)
+├── app/
+│   ├── web/
+│   │   ├── routes.py             # Flask 라우트 (미디어 + Claude 통합)
+│   │   └── templates/
+│   │       ├── index.html        # YouTube 다운로더 UI
+│   │       └── claude.html       # Claude 채팅 UI
+│   ├── downloader/
+│   │   └── core.py               # yt-dlp MP3 다운로드 로직
+│   ├── discord_bot/
+│   │   └── bot.py                # Discord 봇 (/mp3, !mp3 커맨드)
+│   └── common/
+│       └── config.py             # 공통 설정 (포트, 경로 등)
+├── downloads/                    # MP3 저장 폴더
+└── logs/                         # 로그
 ```
 
-## 기술 스택
-- **백엔드**: Python / Flask 3.x
-- **Claude 호출**: `proot-distro` Alpine 컨테이너 안에서 `claude-code-linux-arm64-musl` 바이너리를 subprocess로 실행
-  - API 키 불필요 — 이미 로그인된 Claude Code 세션 인증 재사용
-- **프론트엔드**: 순수 HTML/CSS/JS (프레임워크 없음)
+---
 
-## 주요 파일 설명
+## 라우트
 
-### app.py
-- `GET /` — index.html 렌더링
-- `POST /chat` — JSON `{ "message": "..." }` 수신 → `claude -p` 호출 → `{ "reply": "..." }` 반환
-- subprocess 호출 방식: `proot-distro login alpine --bind ~/:/root -- <musl_bin> -p <message>`
-- 타임아웃 120초
+| 경로 | 메서드 | 설명 |
+|------|--------|------|
+| / | GET | YouTube 다운로더 UI |
+| /claude | GET | Claude 채팅 UI |
+| /download | POST | YouTube MP3 다운로드 시작 |
+| /status/\<job_id\> | GET | 다운로드 작업 상태 조회 |
+| /files/\<filename\> | GET | MP3 파일 다운로드 |
+| /files/\<filename\> | DELETE | MP3 파일 삭제 |
+| /chat | POST | Claude 채팅 (UI용, JSON: {message}) |
+| /api | POST | Claude API (봇용, JSON: {msg} or {message}) |
 
-### templates/index.html
-- 입력창 (`<textarea>`) — 메시지 작성
-- **전송** 버튼 + `Ctrl+Enter` 단축키로 전송
-- **지우기** 버튼으로 입/출력 초기화
-- 출력창 — Claude 응답 표시 (read-only textarea)
-- 응답 대기 중 버튼 비활성화, 오류 시 빨간색 표시
+---
 
-## 실행 방법
+## Claude 호출 구조
+
+```
+ask_claude(message)
+  └─ subprocess: proot-distro login alpine --bind ~/:/root
+       └─ /data/.../claude-code-linux-arm64-musl/claude -p <message>
+```
+
+- **인증**: ~/.claude/.credentials.json (로컬 기기에서 복사, Claude Code 세션 공유)
+- **타임아웃**: 120초
+
+### Claude 바이너리 관련 배경
+Termux에서 `execve`는 shebang/ELF 없이 실행 불가 → proot-distro Alpine(musl) 환경에서 실행.
+glibc 바이너리는 ld-linux 없어 불가 → musl 빌드만 동작.
+
+---
+
+## 서비스 관리 (runit)
 
 ```bash
-cd ~/test1
-export ANTHROPIC_API_KEY="sk-ant-..."
-python app.py
+sv status  $PREFIX/var/service/testbot1-flask   # 상태 확인
+sv restart $PREFIX/var/service/testbot1-flask   # 재시작
+sv stop    $PREFIX/var/service/testbot1-flask   # 중지
+sv start   $PREFIX/var/service/testbot1-flask   # 시작
 ```
 
-브라우저에서 `http://localhost:5000` 접속.
+- 서비스 파일: `$PREFIX/var/service/testbot1-flask/run`
+- 로그: ~/logs/testbot1-flask/ (svlogd 자동 로테이션)
+- Termux 재시작 시 자동 복구: ~/.bashrc에 runsvdir 등록됨
 
-## 설치된 패키지 (Termux 환경)
-```
-flask
-requests
-proot
-proot-distro (Alpine 컨테이너)
-patchelf
-@anthropic-ai/claude-code-linux-arm64-musl  (npm global, --force)
-@anthropic-ai/claude-code-linux-arm64       (npm global, --force, 미사용)
-```
+---
 
-## Termux에서 `claude -p` subprocess 실행 문제 해결 경위
+## 메신저봇 연동
 
-### 문제
-Flask에서 `subprocess.run(["claude", "-p", ...])` 호출 시 `[Errno 8] Exec format error` 발생.
+| 기기 | 봇 파일 | 연동 서버 | 반응 방 |
+|------|---------|-----------|---------|
+| 로컬(0.11) | /sdcard/chatbot/BotData/testbot1/... | 0.11:5000/api | 대장간2 |
+| 원격(0.10) | /storage/emulated/0/msgbot/Bots/testbot1/testbot1.js | 0.11:5000/api | 대장간3, 김완규 |
 
-### 원인 분석
-1. `/usr/bin/claude` → `claude.exe` 는 shebang 없는 500바이트 셸 스크립트(에러 출력 후 종료)
-2. Python `execve`는 shebang/ELF magic이 없으면 실패 (bash는 직접 읽어 실행하지만 execve는 불가)
-3. `bash -lc "claude -p ..."` 도 동일하게 스크립트 내용 자체가 "native binary not installed" 에러
-4. `cli-wrapper.cjs` 도 `linux-arm64-android` 플랫폼 미지원으로 거부
-5. `@anthropic-ai/claude-code-linux-arm64-android` npm 패키지 자체가 존재하지 않음
-6. glibc 바이너리(`linux-arm64`)는 `/lib/ld-linux-aarch64.so.1` 없어서 실행 불가
-7. musl 바이너리(`linux-arm64-musl`)는 `/lib/ld-musl-aarch64.so.1` 없어서 실행 불가
+※ 원격 기기 testbot1.js는 현재 로컬 기기(0.11:5000)를 호출 중. 원격 서버(0.10:8080)로 변경 가능.
 
-### 해결책
-`proot-distro`로 Alpine Linux(musl 기반) 컨테이너를 구축하고, musl 빌드 claude 바이너리를 그 안에서 실행.
-홈 디렉토리를 `/root`로 바인딩해 기존 Claude Code 로그인 세션 인증을 공유.
+---
+
+## Git 관리
 
 ```bash
-proot-distro install alpine
-proot-distro login alpine --bind ~/:/root -- \
-  /data/data/com.termux/files/usr/lib/node_modules/@anthropic-ai/claude-code-linux-arm64-musl/claude \
-  -p "메시지"
+# 원격 기기에서 (GIT_DIR 지정 필요)
+export GIT_DIR=/storage/emulated/0/msgbot/Bots/testbot1/.git
+export GIT_WORK_TREE=/storage/emulated/0/msgbot/Bots/testbot1
+git pull origin main
 ```
 
-## 실행 방법
-
-```bash
-cd ~/test1
-python app.py &
-```
-
-브라우저에서 `http://localhost:5000` 접속. API 키 불필요.
+---
 
 ## 작업 이력
-| 날짜       | 내용 |
-|------------|------|
-| 2026-06-09 | test1 폴더 생성 |
-| 2026-06-09 | Flask 앱 및 HTML 템플릿 구현 |
-| 2026-06-09 | Termux 환경 패키지 이슈로 anthropic SDK → requests 직접 호출로 변경 |
-| 2026-06-09 | claude CLI subprocess 호출 방식으로 전환 시도 → Exec format error 문제 발생 |
-| 2026-06-09 | proot-distro Alpine + musl 바이너리 방식으로 최종 해결, API 키 불필요 |
+
+| 날짜 | 내용 |
+|------|------|
+| 2026-06-09 | 로컬 기기에 Flask + Claude Chat 앱 구축 |
+| 2026-06-09 | proot-distro Alpine + musl 바이너리로 Claude 호출 문제 해결 |
+| 2026-06-10 | GitHub 레포 생성 (testbot1), 코드 푸시 |
+| 2026-06-10 | 원격 기기에 proot-distro + Alpine + npm + claude 설치 |
+| 2026-06-10 | runit 서비스 등록, 상시 실행 설정 |
+| 2026-06-10 | s10e_media_node(YouTube봇)와 Claude 채팅 서버 통합 (port 8080) |
+| 2026-06-10 | 공인IP(118.32.140.85:8022) SSH 접속 확인 |
