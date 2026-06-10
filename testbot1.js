@@ -1,7 +1,15 @@
 const scriptName = "testbot1";
 
 function response(room, msg, sender, isGroupChat, replier, imageDB, packageName) {
-  if (room !== "대장간3" && room !== "김완규") return;
+  if (msg.trim() === "재시작") {
+    try {
+      Bridge.reload();
+      replier.reply("재시작했습니다.");
+    } catch (e) {
+      replier.reply("[재시작 실패] " + e.toString());
+    }
+    return;
+  }
 
   try {
     var url = new java.net.URL("http://127.0.0.1:8080/api");
