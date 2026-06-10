@@ -4,7 +4,7 @@ function response(room, msg, sender, isGroupChat, replier, imageDB, packageName)
   if (room !== "대장간3" && room !== "김완규") return;
 
   try {
-    var url = new java.net.URL("http://192.168.0.11:5000/api");
+    var url = new java.net.URL("http://127.0.0.1:8080/api");
     var conn = url.openConnection();
     conn.setRequestMethod("POST");
     conn.setRequestProperty("Content-Type", "application/json; charset=UTF-8");
