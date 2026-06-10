@@ -3,7 +3,7 @@ const scriptName = "testbot1";
 function response(room, msg, sender, isGroupChat, replier, imageDB, packageName) {
   if (msg.trim() === "재시작") {
     try {
-      Bridge.reload();
+      Api.reload(scriptName);
       replier.reply("재시작했습니다.");
     } catch (e) {
       replier.reply("[재시작 실패] " + e.toString());
