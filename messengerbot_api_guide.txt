@@ -1,0 +1,280 @@
+메신저봇R API 가이드 (testbot1.js 개발 참고용)
+정리일: 2026-06-10
+
+출처:
+- 1~8장(레거시 API): botmanual.txt(moonbot.tistory.com 출처) + darktornado KakaoTalkBot 문서가
+  내용 일치하여 신뢰도 높음. Api.reload() 등은 실제 testbot1.js 수정에 적용해 검증됨.
+- 9장(API 2): darktornado.github.io/KakaoTalkBot 문서 기준이며, 메신저봇R(com.xfl.msgbot)과
+  100% 동일한 앱인지 미확인 — violet.develope.kr(메신저봇R 공식 가이드)은 접근 차단(ECONNREFUSED)으로
+  대조 못함. 실제 사용 전 메신저봇R 앱에서 직접 동작 확인 필요.
+
+================================================================
+1. 이벤트 리스너 (레거시, 현재 testbot1.js가 사용하는 방식)
+================================================================
+
+response(room, msg, sender, isGroupChat, replier, imageDB, packageName, isMultiChat)
+  - 메시지 수신 시 호출되는 메인 함수
+  - room        : 채팅방 이름 (1:1은 발신자 닉네임)
+  - msg         : 수신 메시지 내용
+  - sender      : 발신자 닉네임
+  - isGroupChat : 단체채팅 여부
+  - replier     : 응답 객체. reply(msg), replyDelayed(msg, ms), markAsRead() 제공
+  - imageDB     : 프로필/수신 이미지 정보 객체
+  - packageName : 메시징 앱 패키지명
+  - isMultiChat : 듀얼 메신저 여부
+
+생명주기 함수 (액티비티, onCreate 등 UI 관련)
+  - onCreate(savedInstanceState, activity)
+  - onStart(activity)
+  - onResume(activity)
+  - onPause(activity)
+  - onStop(activity)
+  - onRestart(activity)
+  - onDestroy(activity)
+  - onBackPressed(activity)
+
+기타 이벤트
+  - onStartCompile()         : 스크립트 리로드(컴파일) 직전 호출
+  - onLoaded(context)         : 스크립트 리로드 완료 후 호출
+  - secondTick()              : 1초마다 호출
+  - onNotificationPosted()    : 알림 표시 시
+  - onNotificationRemoved()   : 알림 제거 시
+  - onBatteryLevelChanged()   : 배터리 잔량 변화 시
+
+
+================================================================
+2. Api 객체 (레거시) — 봇 제어/메시지 송수신/시스템
+================================================================
+
+[봇 제어]
+  boolean reload(String botName)   : 해당 봇 리로드 (괄호 비우면 전체 컴파일). compile()과 동일
+  boolean compile(String botName)  : reload()와 동일
+  int     prepare(String botName)  : 미컴파일 상태일 때만 컴파일. 0=없음/1=성공/2=이미컴파일됨, 에러시 throw
+  boolean unload(String botName)   : 봇을 미컴파일 상태로 전환
+  void    on(String botName)       : 봇 켜기 (괄호 비우면 전체)
+  void    off(String botName)      : 봇 끄기 (괄호 비우면 전체)
+  boolean isOn(String botName)     : 봇 켜짐 여부
+  boolean isCompiled(String botName)   : 컴파일 상태 여부
+  boolean isCompiling(String botName)  : 컴파일 중 여부
+  String[] getScriptNames()        : 모든 봇(스크립트) 이름 목록
+
+[메시지 송수신]
+  boolean replyRoom(String room, String msg[, String packageName])
+      : 해당 방에 메시지 전송. 안정성은 replier.reply() 권장
+  boolean canReply(String room[, String packageName])
+      : 메시지 송수신 가능 여부
+  boolean markAsRead(String room[, String packageName])
+      : 채팅방 읽음 처리
+  String[] getRoomList(String packageName)
+      : 응답 가능한 채팅방 목록
+
+[이미지 - Android 10 이하]
+  String getLastImage()                    : 최근 수신 이미지 Base64
+  android.graphics.Bitmap getLastImageBitmap()
+
+[UI/시스템]
+  android.content.Context getContext()
+  void runOnUiThread(Function func) / UIThread(Function func)
+  void showToast(String title, String content) / showToast(String msg, int length)
+  void makeNoti(String title, String content, int id)  : ID 같으면 알림 대체, 다르면 누적
+  void gc()                                : 가비지 컬렉션 강제 실행
+
+[번역/날씨]
+  String papagoTranslate(lang1, lang2, value)  : 파파고 번역 (전체 사용자 합산 10,000회 제한)
+
+
+================================================================
+3. Bridge 객체 (레거시) — 스크립트 간 데이터/스코프 공유
+================================================================
+  ※ reload/compile 기능 없음! 리로드는 Api.reload() 사용.
+
+  boolean isAllowed(String botName)
+      : 해당 봇이 Bridge 접근을 허용했는지 여부
+  ScriptableObject getScopeOf(String botName)
+      : 해당 봇의 전역 스코프 반환 (미컴파일/접근불허 시 null)
+  boolean evaluateStringIn(String botName, String src)
+      : 해당 봇의 전역 스코프에서 코드 실행
+
+  [전역/방별 변수 저장]
+  String getGlobalVariable(String name)
+  String setGlobalVariable(String name, String value)
+  String getVariable(String room, String name)
+  String setVariable(String room, String name, String value)
+
+
+================================================================
+4. Bot 객체 (레거시)
+================================================================
+  android.content.Context getContext()
+  String  getJsVersion()                : 자바스크립트 버전
+  String  getVersion()                  : 메신저봇 앱 버전
+  void    on(String botName) / off(String botName)
+  boolean reload(String botName)        : Api.reload()와 동일
+  void    runOnUiThread(String name, Function func)
+  boolean send(String room, String msg, String packageName)  : Api.replyRoom()과 동일
+
+
+================================================================
+5. Device 객체 (레거시)
+================================================================
+  String getAndroidVersion() / getAndroidVersionName()
+  int    getApiLevel() / getAndroidVersionCode()
+  int    getBatteryHealth()
+  android.content.Intent getBatteryIntent()
+  String getBatteryLevel()      : 배터리 잔량(%)
+  int    getBatteryStatus()
+  double getBatteryTemp()       : 배터리 온도(℃)
+  int    getBatteryVoltage()
+  android.os.Build getBuild()
+  String getModelName() / getPhoneModel()
+  String getPhoneBrand()
+  boolean isCharging()
+
+
+================================================================
+6. FileStream 객체 (레거시) — 파일 입출력
+================================================================
+  String  read(String path)                          : 파일 읽기 (없으면 null)
+  object  readJson(String path)                      : JSON 파일 -> 객체
+  void    write(String path, String value)           : save()와 동일 (덮어쓰기)
+  void    writeJson(String path, object json)        : saveJson()과 동일
+  void    save(String path, String value[, boolean append])
+  void    saveJson(String path, object json)
+  void    append(String path, String value)          : 파일 끝에 추가
+  boolean remove(String path)
+  boolean copyFile(String path1, String path2)
+  String  moveFile(String path1, String path2)
+  boolean createDir(String path)
+  String  getSdcardPath()                            : 내장메모리 최상위 경로
+  ※ 메신저봇에서도 append/read/write/remove는 사용 가능
+
+
+================================================================
+7. Log / GlobalLog 객체 (레거시)
+================================================================
+  Log.info(log, showToast)  / Log.i(...)   : 일반 로그
+  Log.debug(log, showToast) / Log.d(...)   : 녹색 로그
+  Log.error(log, showToast) / Log.e(...)   : 빨간색 로그
+  Log.clear()
+
+  GlobalLog도 동일한 4개 함수(info/debug/error/clear) 제공 — 글로벌 로그에 기록
+
+
+================================================================
+8. Utils 객체 (레거시)
+================================================================
+  String getWebText(String url, boolean removeTags)   : jsoup으로 URL 소스 가져오기, 태그 제거 옵션
+  String getWebText2(String url, String encoding)     : java.net으로 URL 소스 가져오기 (인코딩 지정)
+  String getHtmlFromWeb(String url)                   : getWebText2(url,"UTF-8")과 동일 (구버전 호환)
+  org.jsoup.nodes.Document parse(String url)          : jsoup Document로 반환
+  String removeTags(String html)
+  String removeRLO(String str)                        : 반전문자 제거
+  String compress(String value)
+  void   copyToClipboard(String value)
+  void   delay(int ms) / sleep(int ms)
+  void   toast(String msg)
+  void   vibrate(double sec)
+  String getWeatherJSON(String location|zoneId)       : 기상청 날씨 정보
+  String getZoneIdByName(String location)
+  String getJosa(word, josa)        : 미구현
+  String translate(lang1, lang2, value)  : 미작동, Api.papagoTranslate() 권장
+
+
+================================================================
+9. API 2 (참고/미검증 — 메신저봇R 호환성 확인 필요)
+================================================================
+
+[App]
+  android.content.Context getContext()
+  void runOnUiThread(Function func)
+
+[AppData]  — SharedPreferences 기반 키/값 저장
+  boolean getBoolean(key, default) / void putBoolean(key, value)
+  int     getInt(key, default)     / void putInt(key, value)
+  String  getString(key, default)  / void putString(key, value)
+  void    remove(key)
+  void    clear()
+
+[Bot]  (인스턴스, BotManager.getCurrentBot() 등으로 획득)
+  void    addListener(eventName, listener)
+  void    removeListener(eventName, listener)
+  void    removeAllListener(eventName, listener)
+  boolean compile()                : 봇 리로드
+  String  getName()
+  boolean getPower() / void setPower(boolean)
+  boolean canReply(room[, packageName])
+  markAsRead(room[, packageName])
+  void    setCommandPrefix(String prefix)
+  boolean send(room, msg[, packageName])
+
+[BotManager]
+  boolean compile(botName)
+  Bot     getBot(botName)
+  Bot[]   getBotList()
+  Bot     getCurrentBot()
+  boolean getPower(botName) / void setPower(botName, isOn)
+  String[] getRooms([packageName])
+
+[Broadcast] — 봇 스크립트 간 메시지 브로드캐스트
+  int     send(broadcastName, value)          : 수신한 봇 개수 반환
+  boolean register(broadcastName, callback)
+  boolean unregister(broadcastName)
+  boolean unregisterAll()
+
+[Database] — /내장메모리/ChatBot/database/ 폴더에 파일 저장
+  boolean exists(fileName)
+  Object  readObject(fileName)   : JSON -> 객체
+  String  readString(fileName)
+  Object  writeObject(fileName, object)
+  String  writeString(fileName, value)
+  boolean remove(fileName)
+
+[Event] — addListener에 사용하는 이벤트 상수
+  Event.MESSAGE = "message"
+      function(chat) — chat.content, chat.reply(msg), chat.markAsRead(),
+                        chat.room.{name,chatId,isGroupChat,isOpenChat},
+                        chat.author.name, chat.image.getBase64()/getBitmap()
+  Event.COMMAND = "command"
+      prefix로 시작하는 메시지 수신 시. chat.command(접두어 제외 명령), chat.args(인자 배열)
+  Event.START_COMPILE = "startCompile"   : 봇 컴파일 시작 시 (인자 없음)
+  Event.TICK = "tick"                    : 1초마다 (인자 없음)
+  Event.NOTIFICATION_POSTED = "notificationPosted"     : function(sbn, sm)
+  Event.NOTIFICATION_REMOVED = "notificationRemoved"   : function(sbn, rankingMap, reason)
+  Event.BATTERY_LEVEL_CHANGED = "batteryLevelChanged"  : function(batteryStatus) — level.before/after, status
+  Event.MEMBER_COUNT_CHANGED = "memberChanged"         : 오픈채팅방 인원 변동
+
+  Event.Activity.{CREATE,START,RESUME,PAUSE,STOP,RESTART,DESTROY,BACK_PRESSED}
+      : 각 onXxx 생명주기에 대응하는 액티비티 이벤트 상수
+
+[GlobalLog]
+  info/debug/error(log, showToast), clear()  — Log와 동일하나 전역 로그
+
+[Http] — 비동기/동기 HTTP 요청 (java.net.URL 대체 가능, 현재 testbot1.js는 java.net.URL 사용 중)
+  void request(String url, function(e, res, doc) {})
+  void request(object option, function(e, res, doc) {})
+  org.jsoup.nodes.Document requestSync(String url)
+  org.jsoup.nodes.Document requestSync(object option)
+
+  option = {
+    url: String (필수),
+    method: "GET"|"POST"|"DELETE"|"PATCH"|"PUT"|"TRACE"|"OPTIONS" (기본 GET),
+    timeout: ms (기본 3000),
+    headers: { ... }
+  }
+  콜백(e, res, doc): e=실패시 예외, res=jsoup Connection.Response(상태코드 등), doc=jsoup Document
+
+  ※ POST 바디(JSON 등) 전달 방법은 문서에 명시 안 됨 — 실제 사용 전 별도 확인 필요.
+     현재 testbot1.js는 java.net.HttpURLConnection으로 JSON POST 구현 중이며 정상 동작.
+
+[Security]
+  해시: hashCode, sha, sha256, sha384, sha512
+  인코딩: base32Encode/Decode, base64Encode/Decode
+  암호화: aesEncode/aesDecode(key, iv, value), ariaEncode/ariaDecode(key, value) — ARIA는 호환성 미확인
+
+
+================================================================
+참고
+================================================================
+- testbot1.js는 현재 레거시 이벤트 리스너(response 함수) + java.net.URL(Http API2 미사용) 방식.
+- "재시작" 명령은 Api.reload(scriptName) 사용 (Bridge.reload()는 존재하지 않음, 2026-06-10 수정).
+- 출처 사이트: https://darktornado.github.io/KakaoTalkBot/docs/ , https://violet.develope.kr/
