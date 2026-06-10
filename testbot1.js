@@ -41,7 +41,20 @@ function response(room, msg, sender, isGroupChat, replier, imageDB, packageName)
       replier.reply("[오류] " + result.error);
     }
   } catch (e) {
-    replier.reply("[오류] " + e.toString());
+    var errMsg = e.toString();
+    replier.reply("[오류] " + errMsg);
+    try {
+      var errConn = new java.net.URL("http://127.0.0.1:8080/report_error").openConnection();
+      errConn.setRequestMethod("POST");
+      errConn.setRequestProperty("Content-Type", "application/json; charset=UTF-8");
+      errConn.setDoOutput(true);
+      errConn.setConnectTimeout(5000);
+      var errBody = JSON.stringify({ error: errMsg, room: room, sender: sender, msg: msg });
+      errConn.getOutputStream().write(new java.lang.String(errBody).getBytes("UTF-8"));
+      errConn.getInputStream();
+    } catch (e2) {
+      // 에러 보고 자체 실패는 무시
+    }
   }
 }
 
