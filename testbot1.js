@@ -12,7 +12,7 @@ function response(room, msg, sender, isGroupChat, replier, imageDB, packageName)
     conn.setConnectTimeout(5000);
     conn.setReadTimeout(130000);
 
-    var body = JSON.stringify({ msg: msg });
+    var body = JSON.stringify({ msg: msg, room: room, sender: sender });
     var bytes = new java.lang.String(body).getBytes("UTF-8");
     conn.getOutputStream().write(bytes);
 
