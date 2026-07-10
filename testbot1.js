@@ -42,7 +42,6 @@ function response(room, msg, sender, isGroupChat, replier, imageDB, packageName)
     }
   } catch (e) {
     var errMsg = e.toString();
-    replier.reply("[오류] " + errMsg);
     try {
       var errConn = new java.net.URL("http://127.0.0.1:8080/report_error").openConnection();
       errConn.setRequestMethod("POST");
